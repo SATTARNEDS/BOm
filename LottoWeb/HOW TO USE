@@ -1,0 +1,15 @@
+วิธีใช้งาน (ทำเฉพาะวันหวยออก):
+
+เปิดโปรแกรมหวยของคุณ (python app.py) ให้รันอยู่ที่ port 5000 ตามปกติ
+
+เปิดโปรแกรม ngrok ขึ้นมา
+
+พิมพ์คำสั่ง: ngrok http 5000 แล้วกด Enter
+
+มันจะโชว์ลิงก์ยาวๆ (เช่น https://25a1-124-120-xxx.ngrok-free.app)
+
+ก๊อปปี้ลิงก์นี้ส่งให้ลูกน้อง เข้าใช้งานผ่านมือถือได้เลยครับ
+
+
+API KEY สำหรับใช้งานกับเว็บ LottoWeb
+API KEY: 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
