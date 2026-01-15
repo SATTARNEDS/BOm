@@ -94,8 +94,6 @@ def expand_numbers(number, mode):
 
 def parse_quick_lotto(text):
     items = []
-    # ล้างอักขระที่ไม่จำเป็น แปลงตัวแยกให้เป็นมาตรฐาน
-    # หมายเหตุ: Prompt จะแปลง + หรือ x เป็น * มาให้แล้ว แต่เรากันเหนียวไว้ที่นี่ด้วย
     text = text.replace('=', ' ').replace('x', '*').replace('X', '*').replace('+', '*').replace('-', ' ')
     lines = re.split(r'[\n,]', text)
     
@@ -108,12 +106,10 @@ def parse_quick_lotto(text):
         price_part = parts[-1]
         number_parts = parts[:-1]
         
-        # ตรวจสอบราคา (ต้องเป็นตัวเลข หรือมี *)
         if not re.match(r'^[\d\*]+$', price_part): continue 
         prices = price_part.split('*')
         
         for num in number_parts:
-            # กรองเอาเฉพาะตัวเลขออกมา
             num = re.sub(r'\D', '', num)
             if not num: continue
             
@@ -123,8 +119,6 @@ def parse_quick_lotto(text):
                                   {'num': num, 'type': '3 ตัวโต๊ด', 'amt': prices[1]}, 
                                   {'num': num, 'type': '3 ตัวล่าง', 'amt': prices[2]}])
                 elif len(prices) == 2: 
-                    # ส่วนใหญ่ถ้ามา 2 ยอดของ 3 ตัว มักจะเป็น บน-โต๊ด (แต่ถ้าลูกค้าตั้งใจเป็น บน-ล่าง ต้องแก้ Logic นี้)
-                    # ตาม Prompt: 521=20*20 -> บน*โต๊ด
                     items.extend([{'num': num, 'type': '3 ตัวบน', 'amt': prices[0]}, 
                                   {'num': num, 'type': '3 ตัวโต๊ด', 'amt': prices[1]}])
                 elif len(prices) == 1: 
@@ -147,35 +141,24 @@ def parse_quick_lotto(text):
 # --- ฟังก์ชันเรียก Groq AI (Vision) ---
 def call_groq_vision(image_bytes):
     base64_image = base64.b64encode(image_bytes).decode('utf-8')
-    
-    # ✅ ใช้โมเดล 90b Preview (ดีที่สุดสำหรับ Vision ตอนนี้)
     model_name = "meta-llama/llama-4-scout-17b-16e-instruct" 
-    
-    # ✅ PROMPT: ปรับแต่งให้รองรับรูปแบบ +, x และตัดคำฟุ่มเฟือย
     prompt = """
     Role: Expert Thai Lottery OCR.
     Task: Extract numbers and prices from the image strictly for machine processing.
-
     Rules for Extraction:
     1.  **Standardize Separators:**
         - The input may use '+', 'x', 'X', '=', or spaces.
         - **CONVERT ALL separators to Asterisk (*).**
-        - Example: "521=20+20"  MUST become "521=20*20"
-        - Example: "286=100x100" MUST become "286=100*100"
-    
     2.  **Format Structure (Number=Price...):**
         - 3 Digits: Number=Top*Toad*Bottom (or Number=Top*Toad)
         - 2 Digits: Number=Top*Bottom
         - 1 Digit:  Number=Top*Bottom
-
     3.  **Clean Noise:**
         - **IGNORE** headers like "บ.ล", "บน", "ล่าง".
-        - **IGNORE** names, nicknames, or emojis (e.g., 🇹🇭, P เม่น, ไตรพิชิต).
+        - **IGNORE** names.
         - Convert Thai numerals (๐-๙) to Arabic (0-9).
-
     4.  **Output:** - Return ONLY the formatted data lines. No other text.
     """
-
     try:
         completion = groq_client.chat.completions.create(
             model=model_name,
@@ -184,12 +167,7 @@ def call_groq_vision(image_bytes):
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                            },
-                        },
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
                     ],
                 }
             ],
@@ -225,11 +203,9 @@ def handle_image_message(event):
             except:
                 buyer_name = "LINE User"
 
-            # 1. รับรูป
             message_content = line_bot_blob_api_v3.get_message_content(event.message.id)
             img_data = message_content
 
-            # แจ้งลูกค้าว่ากำลังทำงาน
             line_bot_api_v3.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
@@ -237,35 +213,16 @@ def handle_image_message(event):
                 )
             )
 
-            # 2. ส่งให้ AI อ่าน
             try:
                 text_result = call_groq_vision(img_data)
-                print(f"AI Result: {text_result}")
-                
                 if "Error:" in text_result:
-                    line_bot_api_v3.push_message(
-                        PushMessageRequest(
-                            to=event.source.user_id,
-                            messages=[TextMessageV3(text=f"❌ AI ขัดข้อง: {text_result}")]
-                        )
-                    )
-                    return
-
+                    line_bot_api_v3.push_message(PushMessageRequest(to=event.source.user_id, messages=[TextMessageV3(text=f"❌ AI ขัดข้อง: {text_result}")])); return
             except Exception as e:
-                print(e)
-                return
+                print(e); return
             
-            # 3. แปลงและบันทึก
             items = parse_quick_lotto(text_result)
-            
             if not items:
-                line_bot_api_v3.push_message(
-                    PushMessageRequest(
-                        to=event.source.user_id,
-                        messages=[TextMessageV3(text="❌ อ่านตัวเลขไม่ได้ครับ ลองเขียนให้ชัดขึ้นอีกนิดนะครับ")]
-                    )
-                )
-                return
+                line_bot_api_v3.push_message(PushMessageRequest(to=event.source.user_id, messages=[TextMessageV3(text="❌ อ่านตัวเลขไม่ได้ครับ")])); return
 
             conn = sqlite3.connect(DB_NAME)
             cursor = conn.cursor()
@@ -284,15 +241,9 @@ def handle_image_message(event):
                 
             conn.commit()
             conn.close()
-            
             msg_summary += f"\n✅ บันทึกสำเร็จ {saved_count} รายการ"
             
-            line_bot_api_v3.push_message(
-                PushMessageRequest(
-                    to=event.source.user_id,
-                    messages=[TextMessageV3(text=msg_summary)]
-                )
-            )
+            line_bot_api_v3.push_message(PushMessageRequest(to=event.source.user_id, messages=[TextMessageV3(text=msg_summary)]))
 
     except Exception as e:
         print(f"System Error: {e}")
@@ -322,7 +273,6 @@ def submit_all():
     buyer = data.get('buyer', 'ลูกค้าทั่วไป')
     mode = data.get('mode') 
     items_to_save = []
-    
     current_time = (datetime.utcnow() + timedelta(hours=7)).strftime('%Y-%m-%d %H:%M:%S')
 
     if mode == 'normal':
@@ -354,7 +304,6 @@ def submit_all():
         is_bottom = data.get('check_bottom')
         is_toad = data.get('check_toad')
         amt = int(data.get('amount') or 0)
-        
         if amt > 0:
             expanded_nums = expand_numbers(base_num, spec_type)
             for num in expanded_nums:
@@ -405,24 +354,11 @@ def api_report_full():
         'summary': {'2_top':0, '2_bottom':0, '3_top':0, '3_toad':0, '3_bottom':0, 'run_top':0, 'run_bottom':0, 'total':0}
     }
     
-    map_limit = {
-        '3 ตัวบน': 'limit_3top',
-        '3 ตัวล่าง': 'limit_3bottom',
-        '3 ตัวโต๊ด': 'limit_3toad',
-        '2 ตัวบน': 'limit_2top',
-        '2 ตัวล่าง': 'limit_2bottom',
-        'วิ่งบน': 'limit_run_top', 
-        'วิ่งล่าง': 'limit_run_bottom'
-    }
+    map_limit = {'3 ตัวบน': 'limit_3top', '3 ตัวล่าง': 'limit_3bottom', '3 ตัวโต๊ด': 'limit_3toad', '2 ตัวบน': 'limit_2top', '2 ตัวล่าง': 'limit_2bottom', 'วิ่งบน': 'limit_run_top', 'วิ่งล่าง': 'limit_run_bottom'}
     
     def calc_cut(ttype, total):
-        try:
-            key = map_limit.get(ttype)
-            limit_val = settings.get(key, 0)
-            limit = int(limit_val) if limit_val is not None else 0
-        except:
-            limit = 0
-            
+        try: limit = int(settings.get(map_limit.get(ttype), 0) or 0)
+        except: limit = 0
         if limit == 0: limit = 999999999
         return {'total': total, 'keep': min(total, limit), 'send': max(0, total - limit)}
 
@@ -432,7 +368,6 @@ def api_report_full():
         except: total = 0
             
         ks = {'2 ตัวบน':'2_top','2 ตัวล่าง':'2_bottom','3 ตัวบน':'3_top','3 ตัวโต๊ด':'3_toad','3 ตัวล่าง':'3_bottom','วิ่งบน':'run_top','วิ่งล่าง':'run_bottom'}.get(ttype)
-        
         if ks: 
             data_others['summary'][ks] += total
             data_others['summary']['total'] += total
@@ -451,10 +386,7 @@ def api_report_full():
             elif ttype == 'วิ่งบน': data_others['run_top'].append(item)
             elif ttype == 'วิ่งล่าง': data_others['run_bottom'].append(item)
 
-    list_3 = []
-    for num, vals in data_3.items():
-        list_3.append({'num': num, 'top': vals['top'], 'toad': vals['toad'], 'bottom': vals['bottom']})
-    
+    list_3 = [{'num': k, 'top': v['top'], 'toad': v['toad'], 'bottom': v['bottom']} for k, v in data_3.items()]
     conn.close()
     return jsonify({'3_digit': list_3, **data_others})
 
@@ -464,7 +396,6 @@ def api_ocr_scan():
     file = request.files['image']
     if file.filename == '': return jsonify({"status": "error", "message": "No selected file"})
     try:
-        # ใช้ Logic เดียวกันกับ Line
         text_result = call_groq_vision(file.read())
         return jsonify({"status": "success", "text": text_result})
     except Exception as e:
@@ -513,11 +444,43 @@ def api_buyers():
         res.append({'id':r['id'], 'name':r['name'], 'discount':r['discount'], 'total':r['total'], 'disc_amt':disc_amt, 'net':r['total']-disc_amt})
     conn.close(); return jsonify(res)
 
+# ========================================================
+# ✅ ส่วนที่แก้ไข: API ประวัติผู้ซื้อแบบสรุป 00-99
+# ========================================================
 @app.route('/api/buyer_details/<path:name>')
 def buyer_details(name):
     conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row
-    r = conn.cursor().execute("SELECT * FROM transactions WHERE buyer_name=? ORDER BY id DESC", (name,)).fetchall()
-    conn.close(); return jsonify([dict(x) for x in r])
+    rows = conn.cursor().execute("SELECT * FROM transactions WHERE buyer_name=? ORDER BY number", (name,)).fetchall()
+    conn.close()
+    
+    # สร้างโครงสร้างข้อมูล 00-99 รอไว้
+    data_2 = {f"{i:02d}": {'top': 0, 'bottom': 0} for i in range(100)}
+    data_3 = {}
+    data_run = {'top': [], 'bottom': []}
+
+    for r in rows:
+        n = r['number']
+        t = r['type']
+        try: a = int(r['amount'])
+        except: a = 0
+        
+        if len(n) == 2:
+            if n in data_2:
+                if t == '2 ตัวบน': data_2[n]['top'] += a
+                elif t == '2 ตัวล่าง': data_2[n]['bottom'] += a
+        elif len(n) == 3:
+            if n not in data_3: data_3[n] = {'top': 0, 'toad': 0, 'bottom': 0}
+            if t == '3 ตัวบน': data_3[n]['top'] += a
+            elif t == '3 ตัวโต๊ด': data_3[n]['toad'] += a
+            elif t == '3 ตัวล่าง': data_3[n]['bottom'] += a
+        elif len(n) == 1:
+            if t == 'วิ่งบน': data_run['top'].append({'num':n, 'amt':a})
+            elif t == 'วิ่งล่าง': data_run['bottom'].append({'num':n, 'amt':a})
+            
+    list_2 = [{'num': k, 'top': v['top'], 'bottom': v['bottom']} for k, v in data_2.items()]
+    list_3 = [{'num': k, 'top': v['top'], 'toad': v['toad'], 'bottom': v['bottom']} for k, v in sorted(data_3.items())]
+    
+    return jsonify({'two_digit': list_2, 'three_digit': list_3, 'running': data_run})
 
 @app.route('/api/settings', methods=['GET','POST'])
 def api_settings():
@@ -528,22 +491,40 @@ def api_settings():
     r = dict(conn.cursor().execute("SELECT key, value FROM settings").fetchall())
     conn.close(); return jsonify(r)
 
+# ========================================================
+# ✅ ส่วนที่แก้ไข: API ตรวจหวย (รวมยอดซื้อ และแสดงผล)
+# ========================================================
 @app.route('/check_reward', methods=['POST'])
 def check_reward():
     d = request.json; top3=d.get('top3',''); bot2=d.get('bottom2','')
     conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row
     rows = conn.cursor().execute("SELECT * FROM transactions").fetchall(); conn.close()
-    winners = []; total = 0
-    payout = {'3 ตัวบน':900, '3 ตัวโต๊ด':150, '2 ตัวล่าง':90, '2 ตัวบน':90, 'วิ่งบน':3.2, 'วิ่งล่าง':4.2}
+    
+    winners_agg = {}
     def is_toad(n1, n2): return sorted(n1)==sorted(n2) if len(n2)==3 else False
+    
     for r in rows:
-        prize=0; t=r['type']; n=r['number']; a=r['amount']
-        if t=='3 ตัวบน' and n==top3: prize=a*payout['3 ตัวบน']
-        elif t=='3 ตัวโต๊ด' and is_toad(n, top3): prize=a*payout['3 ตัวโต๊ด']
-        elif t=='2 ตัวล่าง' and n==bot2: prize=a*payout['2 ตัวล่าง']
-        elif t=='2 ตัวบน' and n==top3[-2:]: prize=a*payout['2 ตัวบน']
-        if prize>0: total+=prize; winners.append({'buyer':r['buyer_name'], 'num':n, 'type':t, 'amt':a, 'prize':prize})
-    return jsonify({'total':total, 'winners':winners})
+        is_win=False; t=r['type']; n=r['number'];
+        try: amt = int(r['amount'])
+        except: amt = 0
+        
+        if t=='3 ตัวบน' and n==top3: is_win=True
+        elif t=='3 ตัวโต๊ด' and is_toad(n, top3): is_win=True
+        elif t=='2 ตัวล่าง' and n==bot2: is_win=True
+        elif t=='2 ตัวบน' and n==top3[-2:]: is_win=True
+        
+        if is_win:
+            # ใช้ Tuple (ชื่อ, ประเภท, เลข) เป็น Key ในการรวมยอด
+            key = (r['buyer_name'], t, n)
+            if key not in winners_agg: winners_agg[key] = 0
+            winners_agg[key] += amt
+            
+    # แปลงกลับเป็น List เพื่อส่งให้ Frontend
+    results = []
+    for (buyer, type_, num), total_amt in winners_agg.items():
+        results.append({'buyer': buyer, 'type': type_, 'num': num, 'amt': total_amt})
+            
+    return jsonify({'count': len(results), 'winners': results})
 
 @app.route('/clear_data', methods=['POST'])
 def clear_data():

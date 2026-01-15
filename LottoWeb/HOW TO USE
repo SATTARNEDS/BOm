@@ -16,8 +16,8 @@ API KEY: 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
 
 meta-llama/llama-4-scout-17b-16e-instruct
 
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-
-pip install flask
-pip install groq
-pip install line-bot-sdk
+py app.py

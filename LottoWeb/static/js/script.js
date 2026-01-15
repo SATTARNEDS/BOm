@@ -164,10 +164,102 @@ function saveBuyerData() {
     if(!name) return alert('กรุณาใส่ชื่อ');
     fetch('/api/buyers', { method:id?'PUT':'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id,name,discount}) }).then(r=>r.json()).then(d=>{ if(d.status==='success'){ bootstrap.Modal.getInstance(document.getElementById('manageBuyerModal')).hide(); loadBuyers(); } else alert(d.message); });
 }
-function viewBuy(n) { document.getElementById('modalTitle').innerText='ประวัติการซื้อ: '+n; fetch('/api/buyer_details/'+encodeURIComponent(n)).then(r=>r.json()).then(d=>{ let h=''; d.forEach(i=>h+=`<tr><td>${i.type}</td><td class="fw-bold">${i.number}</td><td>${i.amount.toLocaleString()}</td></tr>`); document.getElementById('buyerDetailBody').innerHTML=h; new bootstrap.Modal(document.getElementById('buyerModal')).show(); }); }
+
+// -------------------------------------------------------------------------
+// ✅ ส่วนที่คงเดิม: ดูประวัติ 00-99 (เรียงเลข) และ 3 ตัว
+// -------------------------------------------------------------------------
+function viewBuy(n) { 
+    document.getElementById('modalTitle').innerText = 'สรุปยอดซื้อ: ' + n; 
+    fetch('/api/buyer_details/' + encodeURIComponent(n))
+    .then(r => r.json())
+    .then(d => { 
+        let html = '<div class="container-fluid p-2">';
+
+        // --- ส่วน 2 ตัว (00-99) ---
+        html += '<div class="card mb-3 border-0 shadow-sm">';
+        html += '<div class="card-header bg-primary text-white fw-bold"><i class="fas fa-list-ol me-2"></i> สรุป 2 ตัว (00-99)</div>';
+        html += '<div class="card-body p-0">';
+        html += '<div class="table-responsive" style="max-height: 50vh;">';
+        html += '<table class="table table-bordered table-sm text-center table-striped table-hover mb-0 align-middle">';
+        html += '<thead class="table-dark sticky-top" style="z-index:10;"><tr><th width="20%">เลข</th><th width="40%">บน</th><th width="40%">ล่าง</th></tr></thead><tbody>';
+        
+        d.two_digit.forEach(i => {
+            let cTop = i.top > 0 ? 'fw-bold text-primary fs-5' : 'text-muted opacity-25';
+            let cBot = i.bottom > 0 ? 'fw-bold text-success fs-5' : 'text-muted opacity-25';
+            let bgRow = (i.top > 0 || i.bottom > 0) ? 'bg-white' : ''; 
+            
+            html += `<tr class="${bgRow}">
+                <td class="fw-bold bg-light font-monospace">${i.num}</td>
+                <td class="${cTop}">${i.top > 0 ? i.top.toLocaleString() : '0'}</td>
+                <td class="${cBot}">${i.bottom > 0 ? i.bottom.toLocaleString() : '0'}</td>
+            </tr>`;
+        });
+        html += '</tbody></table></div></div></div>';
+
+        // --- ส่วน 3 ตัว ---
+        if(d.three_digit.length > 0) {
+            html += '<div class="card mb-3 border-0 shadow-sm">';
+            html += '<div class="card-header bg-success text-white fw-bold"><i class="fas fa-cubes me-2"></i> สรุป 3 ตัว</div>';
+            html += '<div class="card-body p-0">';
+            html += '<div class="table-responsive">';
+            html += '<table class="table table-bordered table-sm text-center table-striped mb-0 align-middle">';
+            html += '<thead class="table-dark"><tr><th>เลข</th><th>บน</th><th>โต๊ด</th><th>ล่าง</th></tr></thead><tbody>';
+            d.three_digit.forEach(i => {
+                html += `<tr>
+                    <td class="fw-bold font-monospace fs-5">${i.num}</td>
+                    <td class="${i.top>0 ? 'text-primary fw-bold': 'text-muted opacity-25'}">${i.top>0 ? i.top.toLocaleString() : '0'}</td>
+                    <td class="${i.toad>0 ? 'text-warning fw-bold': 'text-muted opacity-25'}">${i.toad>0 ? i.toad.toLocaleString() : '0'}</td>
+                    <td class="${i.bottom>0 ? 'text-success fw-bold': 'text-muted opacity-25'}">${i.bottom>0 ? i.bottom.toLocaleString() : '0'}</td>
+                </tr>`;
+            });
+            html += '</tbody></table></div></div></div>';
+        }
+
+        if(d.running && (d.running.top.length > 0 || d.running.bottom.length > 0)) {
+            html += '<div class="card border-0 shadow-sm"><div class="card-header bg-secondary text-white fw-bold">เลขวิ่ง</div><div class="card-body p-2">';
+            d.running.top.forEach(x => html+= `<span class="badge bg-light text-dark border me-1">วิ่งบน ${x.num} = ${x.amt}</span>`);
+            d.running.bottom.forEach(x => html+= `<span class="badge bg-light text-dark border me-1">วิ่งล่าง ${x.num} = ${x.amt}</span>`);
+            html += '</div></div>';
+        }
+
+        html += '</div>'; 
+        document.getElementById('buyerModalBody').innerHTML = html; 
+        new bootstrap.Modal(document.getElementById('buyerModal')).show(); 
+    }); 
+}
 
 // --- OTHER ---
 function loadSettings() { fetch('/api/settings').then(r=>r.json()).then(d=>{ const f=document.getElementById('settingsForm'); for(let [k,v] of Object.entries(d)) if(f[k]) f[k].value=v; }); }
 function saveSettings() { fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(document.getElementById('settingsForm'))))}).then(()=>{alert('บันทึกเรียบร้อย'); syncData();}); }
 function clearData() { if(confirm('ยืนยันล้างข้อมูลทั้งหมด?')) fetch('/clear_data',{method:'POST'}).then(syncData); }
-function doCheck() { fetch('/check_reward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({top3:val('chk_top3'),bottom2:val('chk_bot2')})}).then(r=>r.json()).then(d=>{ let h=`<div class="alert alert-info text-center shadow-sm">ยอดจ่ายรวม: <strong>${d.total.toLocaleString()}</strong> บาท</div>`; if(d.winners.length) d.winners.forEach(w=>h+=`<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"><span>${w.buyer} (${w.type}) [${w.num}]</span><span class="badge bg-success rounded-pill">${w.prize.toLocaleString()}</span></div>`); else h+='<div class="text-center text-muted p-3">ไม่พบผู้ถูกรางวัล</div>'; document.getElementById('checkResult').innerHTML=h; }); }
+
+// -------------------------------------------------------------------------
+// ✅ ส่วนที่แก้ไข: ตรวจหวย (เพิ่มการแสดง Badge ยอดเงินรวม)
+// -------------------------------------------------------------------------
+function doCheck() { 
+    fetch('/check_reward',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({top3:val('chk_top3'),bottom2:val('chk_bot2')})})
+    .then(r=>r.json())
+    .then(d=>{ 
+        let h=`<div class="alert alert-success text-center shadow-sm fs-5">ถูกรางวัลทั้งหมด: <strong>${d.count}</strong> รายการ</div>`; 
+        
+        if(d.winners.length) {
+            h += '<div class="list-group">';
+            d.winners.forEach(w=>{
+                let c = w.type.includes('บน') ? 'text-primary' : (w.type.includes('ล่าง') ? 'text-success' : 'text-warning');
+                // เพิ่ม w.amt.toLocaleString() เพื่อแสดงยอดเงินรวม
+                h+=`<div class="list-group-item d-flex justify-content-between align-items-center">
+                        <span class="fw-bold">${w.buyer}</span>
+                        <span>
+                            <span class="badge bg-light border ${c} text-dark me-2">${w.type}</span>
+                            <span class="fs-5 fw-bold text-danger me-3">${w.num}</span>
+                            <span class="badge bg-success rounded-pill">${w.amt.toLocaleString()} บ.</span>
+                        </span>
+                    </div>`;
+            });
+            h += '</div>';
+        } else {
+            h+='<div class="text-center text-muted p-4 border rounded bg-light">ไม่พบรายการถูกรางวัล</div>'; 
+        }
+        document.getElementById('checkResult').innerHTML=h; 
+    }); 
+}
