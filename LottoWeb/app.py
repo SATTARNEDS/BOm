@@ -8,7 +8,7 @@ from itertools import permutations
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, abort
 
-# --- Library สำหรับ AI (Groq) และ LINE ---
+# --- Library สำหรับ AI (Groq) ---
 from groq import Groq
 
 # --- LINE SDK V3 Imports ---
@@ -21,7 +21,8 @@ from linebot.v3.messaging import (
     MessagingApi,
     MessagingApiBlob,
     ReplyMessageRequest,
-    TextMessage as TextMessageV3
+    TextMessage as TextMessageV3,
+    PushMessageRequest
 )
 
 app = Flask(__name__)
@@ -29,12 +30,12 @@ app.secret_key = 'SecretKeyForLottoSystem'
 DB_NAME = "lotto_pro.db"
 
 # =======================================================
-# 🔑 ส่วนตั้งค่า KEY (แก้ไขตรงนี้)
+# 🔑 ส่วนตั้งค่า KEY
 # =======================================================
-# ใส่ API Key ของ Groq ที่ได้จาก https://console.groq.com
+# Groq API Key
 GROQ_API_KEY = "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" 
 
-# Line Key เดิมของคุณ
+# Line Key
 LINE_ACCESS_TOKEN = "yjtXvz17LZc7Ck6qs5y9Nw3vu72w6dzB5LSvH3sDVgr7RUIorw96if/53K3PDEShH72rwwyaIibv9cQ67RL5OnEWjocadYFNKEfpm3M6A2ZN4yON1+niNvx1zRSG+6EbQaWIxPU7i9HUbQW8+cfsPAdB04t89/1O/w1cDnyilFU="
 LINE_CHANNEL_SECRET = "bb070c58a964ec0e803220902a4d1c32"
 # =======================================================
@@ -93,8 +94,9 @@ def expand_numbers(number, mode):
 
 def parse_quick_lotto(text):
     items = []
-    # ล้างอักขระที่ไม่จำเป็น
-    text = text.replace('=', ' ').replace('x', '*').replace('X', '*')
+    # ล้างอักขระที่ไม่จำเป็น แปลงตัวแยกให้เป็นมาตรฐาน
+    # หมายเหตุ: Prompt จะแปลง + หรือ x เป็น * มาให้แล้ว แต่เรากันเหนียวไว้ที่นี่ด้วย
+    text = text.replace('=', ' ').replace('x', '*').replace('X', '*').replace('+', '*').replace('-', ' ')
     lines = re.split(r'[\n,]', text)
     
     for line in lines:
@@ -106,13 +108,14 @@ def parse_quick_lotto(text):
         price_part = parts[-1]
         number_parts = parts[:-1]
         
-        # ตรวจสอบว่าส่วนราคาเป็นตัวเลขหรือมีเครื่องหมาย *
+        # ตรวจสอบราคา (ต้องเป็นตัวเลข หรือมี *)
         if not re.match(r'^[\d\*]+$', price_part): continue 
         prices = price_part.split('*')
         
         for num in number_parts:
-            # กรองเฉพาะที่เป็นตัวเลข
-            if not num.isdigit(): continue
+            # กรองเอาเฉพาะตัวเลขออกมา
+            num = re.sub(r'\D', '', num)
+            if not num: continue
             
             if len(num) == 3:
                 if len(prices) >= 3: 
@@ -120,6 +123,8 @@ def parse_quick_lotto(text):
                                   {'num': num, 'type': '3 ตัวโต๊ด', 'amt': prices[1]}, 
                                   {'num': num, 'type': '3 ตัวล่าง', 'amt': prices[2]}])
                 elif len(prices) == 2: 
+                    # ส่วนใหญ่ถ้ามา 2 ยอดของ 3 ตัว มักจะเป็น บน-โต๊ด (แต่ถ้าลูกค้าตั้งใจเป็น บน-ล่าง ต้องแก้ Logic นี้)
+                    # ตาม Prompt: 521=20*20 -> บน*โต๊ด
                     items.extend([{'num': num, 'type': '3 ตัวบน', 'amt': prices[0]}, 
                                   {'num': num, 'type': '3 ตัวโต๊ด', 'amt': prices[1]}])
                 elif len(prices) == 1: 
@@ -140,13 +145,37 @@ def parse_quick_lotto(text):
     return [x for x in items if int(x['amt']) > 0]
 
 # --- ฟังก์ชันเรียก Groq AI (Vision) ---
-def call_groq_vision(image_bytes, prompt):
-    # Groq ต้องการรูปเป็น Base64 String
+def call_groq_vision(image_bytes):
     base64_image = base64.b64encode(image_bytes).decode('utf-8')
     
-    # โมเดล Llama-3.2 Vision (ฟรีและเร็ว)
-    model_name = "llama-3.2-11b-vision-preview" 
+    # ✅ ใช้โมเดล 90b Preview (ดีที่สุดสำหรับ Vision ตอนนี้)
+    model_name = "meta-llama/llama-4-scout-17b-16e-instruct" 
     
+    # ✅ PROMPT: ปรับแต่งให้รองรับรูปแบบ +, x และตัดคำฟุ่มเฟือย
+    prompt = """
+    Role: Expert Thai Lottery OCR.
+    Task: Extract numbers and prices from the image strictly for machine processing.
+
+    Rules for Extraction:
+    1.  **Standardize Separators:**
+        - The input may use '+', 'x', 'X', '=', or spaces.
+        - **CONVERT ALL separators to Asterisk (*).**
+        - Example: "521=20+20"  MUST become "521=20*20"
+        - Example: "286=100x100" MUST become "286=100*100"
+    
+    2.  **Format Structure (Number=Price...):**
+        - 3 Digits: Number=Top*Toad*Bottom (or Number=Top*Toad)
+        - 2 Digits: Number=Top*Bottom
+        - 1 Digit:  Number=Top*Bottom
+
+    3.  **Clean Noise:**
+        - **IGNORE** headers like "บ.ล", "บน", "ล่าง".
+        - **IGNORE** names, nicknames, or emojis (e.g., 🇹🇭, P เม่น, ไตรพิชิต).
+        - Convert Thai numerals (๐-๙) to Arabic (0-9).
+
+    4.  **Output:** - Return ONLY the formatted data lines. No other text.
+    """
+
     try:
         completion = groq_client.chat.completions.create(
             model=model_name,
@@ -170,7 +199,7 @@ def call_groq_vision(image_bytes, prompt):
         return completion.choices[0].message.content
     except Exception as e:
         print(f"Groq API Error: {e}")
-        raise e
+        return f"Error: {e}"
 
 # --- LINE BOT Routes ---
 @app.route("/callback", methods=['POST'])
@@ -196,33 +225,44 @@ def handle_image_message(event):
             except:
                 buyer_name = "LINE User"
 
-            # 1. รับข้อมูลรูปภาพ (เป็น bytes)
+            # 1. รับรูป
             message_content = line_bot_blob_api_v3.get_message_content(event.message.id)
             img_data = message_content
 
-            # 2. ส่งให้ Groq AI อ่าน
-            try:
-                # Prompt ปรับให้กระชับ เพื่อให้ AI ตอบตรง format
-                prompt = "Extract lotto numbers from this image. Output format per line: Number=Top*Toad*Bottom (e.g., 123=100*20*20) or Number=Top*Bottom (e.g., 12=50*50). Only output the data lines, no explanation."
-                text_result = call_groq_vision(img_data, prompt)
-                print(f"AI Result: {text_result}")
-            except Exception as e:
-                line_bot_api_v3.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessageV3(text=f"❌ เกิดข้อผิดพลาด AI: {str(e)}")]
-                    )
+            # แจ้งลูกค้าว่ากำลังทำงาน
+            line_bot_api_v3.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessageV3(text="🔍 กำลังแกะลายมือ... (รองรับ +, x, บ.ล)")]
                 )
+            )
+
+            # 2. ส่งให้ AI อ่าน
+            try:
+                text_result = call_groq_vision(img_data)
+                print(f"AI Result: {text_result}")
+                
+                if "Error:" in text_result:
+                    line_bot_api_v3.push_message(
+                        PushMessageRequest(
+                            to=event.source.user_id,
+                            messages=[TextMessageV3(text=f"❌ AI ขัดข้อง: {text_result}")]
+                        )
+                    )
+                    return
+
+            except Exception as e:
+                print(e)
                 return
             
-            # 3. แปลงข้อความและบันทึก
+            # 3. แปลงและบันทึก
             items = parse_quick_lotto(text_result)
             
             if not items:
-                line_bot_api_v3.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessageV3(text="❌ อ่านข้อมูลตัวเลขไม่ได้ หรือรูปแบบไม่ชัดเจน")]
+                line_bot_api_v3.push_message(
+                    PushMessageRequest(
+                        to=event.source.user_id,
+                        messages=[TextMessageV3(text="❌ อ่านตัวเลขไม่ได้ครับ ลองเขียนให้ชัดขึ้นอีกนิดนะครับ")]
                     )
                 )
                 return
@@ -245,11 +285,11 @@ def handle_image_message(event):
             conn.commit()
             conn.close()
             
-            msg_summary += f"\n✅ บันทึก {saved_count} รายการ"
+            msg_summary += f"\n✅ บันทึกสำเร็จ {saved_count} รายการ"
             
-            line_bot_api_v3.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
+            line_bot_api_v3.push_message(
+                PushMessageRequest(
+                    to=event.source.user_id,
                     messages=[TextMessageV3(text=msg_summary)]
                 )
             )
@@ -275,7 +315,6 @@ def home():
     if not check_auth(): return redirect(url_for('login'))
     return render_template('index.html')
 
-# --- API Submit ---
 @app.route('/submit_all', methods=['POST'])
 def submit_all():
     if not check_auth(): return jsonify({"status": "error"})
@@ -425,9 +464,8 @@ def api_ocr_scan():
     file = request.files['image']
     if file.filename == '': return jsonify({"status": "error", "message": "No selected file"})
     try:
-        # ใช้ Groq AI อ่านแทน
-        prompt = "Extract lotto numbers from this image. Output format per line: Number=Top*Toad*Bottom or Number=Top*Bottom. Only output the data lines."
-        text_result = call_groq_vision(file.read(), prompt)
+        # ใช้ Logic เดียวกันกับ Line
+        text_result = call_groq_vision(file.read())
         return jsonify({"status": "success", "text": text_result})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
