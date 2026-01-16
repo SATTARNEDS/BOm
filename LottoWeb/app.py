@@ -50,7 +50,7 @@ except Exception as e:
 
 # --- Database Setup ---
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute('''CREATE TABLE IF NOT EXISTS transactions (
@@ -224,7 +224,7 @@ def handle_image_message(event):
             if not items:
                 line_bot_api_v3.push_message(PushMessageRequest(to=event.source.user_id, messages=[TextMessageV3(text="❌ อ่านตัวเลขไม่ได้ครับ")])); return
 
-            conn = sqlite3.connect(DB_NAME)
+            conn = sqlite3.connect(DB_NAME, timeout=30)
             cursor = conn.cursor()
             try: cursor.execute("INSERT OR IGNORE INTO buyers (name, discount) VALUES (?, 0)", (buyer_name,))
             except: pass
@@ -321,7 +321,7 @@ def submit_all():
     elif mode == 'quick':
         items_to_save.extend(parse_quick_lotto(data.get('quick_text')))
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     cursor = conn.cursor()
     try: cursor.execute("INSERT OR IGNORE INTO buyers (name, discount) VALUES (?, 0)", (buyer,))
     except: pass
@@ -338,7 +338,7 @@ def submit_all():
 @app.route('/api/report_full')
 def api_report_full():
     if not check_auth(): return jsonify({})
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -403,35 +403,35 @@ def api_ocr_scan():
 
 @app.route('/api/transactions')
 def api_all_transactions():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     r = conn.cursor().execute("SELECT id, strftime('%H:%M:%S', created_at) as time, buyer_name, number, type, amount FROM transactions ORDER BY id DESC LIMIT 500").fetchall()
     conn.close()
     return jsonify([{'id':i[0],'time':i[1],'buyer':i[2],'num':i[3],'type':i[4],'amt':i[5]} for i in r])
 
 @app.route('/api/recent')
 def api_recent():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     r = conn.cursor().execute("SELECT id, strftime('%H:%M', created_at) as time, buyer_name, number, type, amount FROM transactions ORDER BY id DESC LIMIT 20").fetchall()
     conn.close()
     return jsonify([{'id':i[0],'time':i[1],'buyer':i[2],'num':i[3],'type':i[4],'amt':i[5]} for i in r])
 
 @app.route('/delete/<int:id>', methods=['POST'])
 def delete_item(id):
-    conn = sqlite3.connect(DB_NAME); conn.cursor().execute("DELETE FROM transactions WHERE id=?",(id,)); conn.commit(); conn.close()
+    conn = sqlite3.connect(DB_NAME, timeout=30); conn.cursor().execute("DELETE FROM transactions WHERE id=?",(id,)); conn.commit(); conn.close()
     return jsonify({"status":"success"})
 
 @app.route('/delete_multiple', methods=['POST'])
 def delete_multiple():
     ids = request.json.get('ids', [])
     if not ids: return jsonify({"status":"error"})
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     conn.cursor().execute(f"DELETE FROM transactions WHERE id IN ({','.join('?'*len(ids))})", ids)
     conn.commit(); conn.close()
     return jsonify({"status":"success"})
 
 @app.route('/api/buyers', methods=['GET','POST','PUT'])
 def api_buyers():
-    conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row; cur = conn.cursor()
+    conn = sqlite3.connect(DB_NAME, timeout=30); conn.row_factory = sqlite3.Row; cur = conn.cursor()
     if request.method == 'POST': 
         try: cur.execute("INSERT INTO buyers (name, discount) VALUES (?, ?)", (request.json['name'], request.json.get('discount',0))); conn.commit(); return jsonify({"status": "success"})
         except: return jsonify({"status": "error", "message": "ชื่อซ้ำ"})
@@ -444,12 +444,35 @@ def api_buyers():
         res.append({'id':r['id'], 'name':r['name'], 'discount':r['discount'], 'total':r['total'], 'disc_amt':disc_amt, 'net':r['total']-disc_amt})
     conn.close(); return jsonify(res)
 
+@app.route('/delete_buyer/<int:id>', methods=['POST'])
+def delete_buyer(id):
+    conn = sqlite3.connect(DB_NAME, timeout=30)
+    cursor = conn.cursor()
+    
+    # 1. ค้นหาชื่อของ ID นี้ก่อน เพื่อนำไปลบยอดซื้อ
+    cursor.execute("SELECT name FROM buyers WHERE id=?", (id,))
+    row = cursor.fetchone()
+    
+    if row:
+        buyer_name = row[0]
+        # 2. ลบรายการซื้อทั้งหมดที่มีชื่อตรงกับคนนี้ (transactions)
+        cursor.execute("DELETE FROM transactions WHERE buyer_name=?", (buyer_name,))
+        # 3. ลบรายชื่อออกจากตารางผู้ซื้อ (buyers)
+        cursor.execute("DELETE FROM buyers WHERE id=?", (id,))
+        conn.commit()
+        msg = "success"
+    else:
+        msg = "error"
+
+    conn.close()
+    return jsonify({"status": msg})
+
 # ========================================================
 # ✅ ส่วนที่แก้ไข: API ประวัติผู้ซื้อแบบสรุป 00-99
 # ========================================================
 @app.route('/api/buyer_details/<path:name>')
 def buyer_details(name):
-    conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row
+    conn = sqlite3.connect(DB_NAME, timeout=30); conn.row_factory = sqlite3.Row
     rows = conn.cursor().execute("SELECT * FROM transactions WHERE buyer_name=? ORDER BY number", (name,)).fetchall()
     conn.close()
     
@@ -484,7 +507,7 @@ def buyer_details(name):
 
 @app.route('/api/settings', methods=['GET','POST'])
 def api_settings():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     if request.method=='POST':
         for k,v in request.json.items(): conn.cursor().execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (k,v))
         conn.commit()
@@ -497,7 +520,7 @@ def api_settings():
 @app.route('/check_reward', methods=['POST'])
 def check_reward():
     d = request.json; top3=d.get('top3',''); bot2=d.get('bottom2','')
-    conn = sqlite3.connect(DB_NAME); conn.row_factory = sqlite3.Row
+    conn = sqlite3.connect(DB_NAME, timeout=30); conn.row_factory = sqlite3.Row
     rows = conn.cursor().execute("SELECT * FROM transactions").fetchall(); conn.close()
     
     winners_agg = {}
@@ -528,7 +551,7 @@ def check_reward():
 
 @app.route('/clear_data', methods=['POST'])
 def clear_data():
-    conn = sqlite3.connect(DB_NAME); conn.cursor().execute("DELETE FROM transactions"); conn.commit(); conn.close()
+    conn = sqlite3.connect(DB_NAME, timeout=30); conn.cursor().execute("DELETE FROM transactions"); conn.commit(); conn.close()
     return jsonify({"status":"success"})
 
 if __name__ == '__main__':

@@ -154,12 +154,40 @@ function loadBuyers() {
         if(s.options.length!==d.length){ s.innerHTML=''; d.forEach(b=>s.add(new Option(b.name,b.name))); if(d.length) s.value=d[0].name; }
         let h=''; 
         d.forEach(b=>{ 
-            h+=`<tr><td class="fw-bold text-start ps-3 text-primary">${b.name}</td><td>${b.total.toLocaleString()}</td><td>${b.discount}%</td><td class="text-danger fw-bold">-${b.disc_amt.toLocaleString()}</td><td class="fw-bold text-success fs-5">${b.net.toLocaleString()}</td><td><button class="btn btn-sm btn-warning me-1 shadow-sm" onclick="editBuyer(${b.id},'${b.name}',${b.discount})"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-info text-white shadow-sm" onclick="viewBuy('${b.name}')"><i class="fas fa-list"></i></button></td></tr>`; 
+            h+=`<tr>
+                <td class="fw-bold text-start ps-3 text-primary">${b.name}</td>
+                <td>${b.total.toLocaleString()}</td>
+                <td>${b.discount}%</td>
+                <td class="text-danger fw-bold">-${b.disc_amt.toLocaleString()}</td>
+                <td class="fw-bold text-success fs-5">${b.net.toLocaleString()}</td>
+                <td>
+                    <button class="btn btn-sm btn-warning me-1 shadow-sm" onclick="editBuyer(${b.id},'${b.name}',${b.discount})"><i class="fas fa-pen"></i></button>
+                    <button class="btn btn-sm btn-info text-white me-1 shadow-sm" onclick="viewBuy('${b.name}')"><i class="fas fa-list"></i></button>
+                    <button class="btn btn-sm btn-danger shadow-sm" onclick="deleteBuyer(${b.id},'${b.name}')"><i class="fas fa-trash"></i></button>
+                </td>
+            </tr>`; 
         });
         document.getElementById('buyerBody').innerHTML=h;
     });
 }
 function addBuyer() { document.getElementById('manageBuyerTitle').innerText="เพิ่มผู้ซื้อ"; document.getElementById('mb_id').value=""; document.getElementById('mb_name').value=""; document.getElementById('mb_discount').value="0"; new bootstrap.Modal(document.getElementById('manageBuyerModal')).show(); }
+function deleteBuyer(id, name) {
+    if(confirm('⚠️ คำเตือน: คุณต้องการลบ "' + name + '" ใช่หรือไม่?\n\n‼️ ยอดซื้อและรายการทั้งหมดของคนนี้จะถูกลบหายไปทันที และกู้คืนไม่ได้')) {
+        fetch('/delete_buyer/' + id, { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if(d.status === 'success') {
+                    // โหลดตารางรายชื่อใหม่
+                    loadBuyers(); 
+                    // โหลดรายการล่าสุด และยอดรวม Dashboard ใหม่ด้วย เพราะยอดหายไปแล้ว
+                    loadRecent();
+                    loadReport(); 
+                } else {
+                    alert('เกิดข้อผิดพลาด ไม่พบข้อมูลผู้ใช้งาน');
+                }
+            });
+    }
+}
 function editBuyer(id,n,d) { document.getElementById('manageBuyerTitle').innerText="แก้ไขข้อมูล"; document.getElementById('mb_id').value=id; document.getElementById('mb_name').value=n; document.getElementById('mb_discount').value=d; new bootstrap.Modal(document.getElementById('manageBuyerModal')).show(); }
 function saveBuyerData() {
     const id=document.getElementById('mb_id').value, name=document.getElementById('mb_name').value, discount=document.getElementById('mb_discount').value;
