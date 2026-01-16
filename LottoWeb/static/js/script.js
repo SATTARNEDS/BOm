@@ -26,7 +26,9 @@ function navTo(id) {
     if(id === 'settings') loadSettings();
 }
 
-function syncData() { loadReport(); loadRecent(); loadBuyers(); }
+function syncData() { 
+    loadRecent(); // สั่งโหลดแค่ "ตารางล่าสุด" ให้คนคีย์เห็นก็พอ
+}
 
 function loadReport() {
     fetch('/api/report_full').then(r=>r.json()).then(d => {
