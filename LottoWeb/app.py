@@ -558,76 +558,110 @@ def clear_data():
     return jsonify({"status":"success"})
 
 # =======================================================
-# ✅ เพิ่มส่วน Export Excel และ PDF
+# ✅ ส่วน Export Excel และ PDF (ปรับปรุงใหม่)
 # =======================================================
 
-# 1. Export Excel: แยก Sheet ตามรายชื่อลูกค้า
+def create_summary_excel(df, sheet_name_func):
+    """ฟังก์ชันช่วยสร้าง Excel แบบแยกคอลัมน์ตามประเภท (Pivot)"""
+    output = io.BytesIO()
+    
+    # 1. รวมยอดเงิน ของเลขเดียวกันและประเภทเดียวกัน (Group By)
+    # ตัดคอลัมน์ที่ไม่จำเป็นออกเพื่อรวมยอด
+    df_agg = df.groupby(['buyer_name', 'number', 'type'])['amount'].sum().reset_index()
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        unique_buyers = df_agg['buyer_name'].unique()
+        
+        for buyer in unique_buyers:
+            # ดึงข้อมูลเฉพาะของลูกค้านั้น
+            buyer_df = df_agg[df_agg['buyer_name'] == buyer]
+            
+            # 2. ทำ Pivot Table เพื่อแยกประเภทเป็นคอลัมน์
+            # Index=เลข, Columns=ประเภท, Values=จำนวนเงิน
+            pivot_df = buyer_df.pivot_table(
+                index='number', 
+                columns='type', 
+                values='amount', 
+                aggfunc='sum', 
+                fill_value=0
+            )
+            
+            # จัดลำดับคอลัมน์ให้สวยงาม (ถ้ามีคอลัมน์นั้นๆ)
+            desired_order = ['3 ตัวบน', '3 ตัวโต๊ด', '3 ตัวล่าง', '2 ตัวบน', '2 ตัวล่าง', 'วิ่งบน', 'วิ่งล่าง']
+            existing_cols = [c for c in desired_order if c in pivot_df.columns]
+            other_cols = [c for c in pivot_df.columns if c not in desired_order]
+            pivot_df = pivot_df[existing_cols + other_cols]
+
+            # เพิ่มคอลัมน์ "รวม" ด้านหลังสุด
+            pivot_df['รวมทั้งหมด'] = pivot_df.sum(axis=1)
+            
+            # เพิ่มแถว "รวมสุทธิ" ด้านล่างสุด
+            pivot_df.loc['รวมสุทธิ'] = pivot_df.sum()
+
+            # ตั้งชื่อ Sheet
+            sheet_name = sheet_name_func(buyer)
+            
+            # เขียนลงไฟล์
+            pivot_df.to_excel(writer, sheet_name=sheet_name)
+            
+    output.seek(0)
+    return output
+
+# 1. Export Excel: แยก Sheet ตามรายชื่อลูกค้า (แบบตารางสรุป)
 @app.route('/export/excel_all')
 def export_excel_all():
     if not check_auth(): return redirect(url_for('login'))
     
     conn = sqlite3.connect(DB_NAME)
-    # ดึงข้อมูลทั้งหมด
-    df = pd.read_sql_query("SELECT buyer_name, number, type, amount, created_at FROM transactions ORDER BY buyer_name, created_at", conn)
+    # ดึงข้อมูลดิบออกมาก่อน
+    df = pd.read_sql_query("SELECT buyer_name, number, type, amount FROM transactions", conn)
     conn.close()
 
-    if df.empty:
-        return "ไม่มีข้อมูลรายการขาย"
+    if df.empty: return "ไม่มีข้อมูลรายการขาย"
 
-    output = io.BytesIO()
-    # ใช้ ExcelWriter เพื่อเขียนหลาย Sheet
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # หาชื่อลูกค้าทั้งหมดที่ไม่ซ้ำกัน
-        unique_buyers = df['buyer_name'].unique()
-        
-        for buyer in unique_buyers:
-            # กรองข้อมูลเฉพาะลูกค้ารายนี้
-            buyer_df = df[df['buyer_name'] == buyer]
-            
-            # ตั้งชื่อ Sheet (Excel ห้ามชื่อยาวเกิน 31 ตัวอักษร)
-            sheet_name = str(buyer)[:30].replace(":", "-").replace("/", "-")
-            
-            # เขียนลง Sheet
-            buyer_df.to_excel(writer, sheet_name=sheet_name, index=False)
-            
-    output.seek(0)
-    return send_file(output, download_name="Lotto_Report_By_User.xlsx", as_attachment=True)
+    # เรียกใช้ฟังก์ชันสร้าง Excel
+    output = create_summary_excel(df, lambda b: str(b)[:30].replace(":", "-"))
+    
+    return send_file(output, download_name="Lotto_Summary_By_User.xlsx", as_attachment=True)
 
-# 2. Export Excel: เฉพาะลูกค้ารายคน
+# 2. Export Excel: เฉพาะลูกค้ารายคน (แบบตารางสรุป)
 @app.route('/export/excel/<path:buyer_name>')
 def export_excel_buyer(buyer_name):
     if not check_auth(): return redirect(url_for('login'))
     
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT number, type, amount, created_at FROM transactions WHERE buyer_name = ?", conn, params=(buyer_name,))
+    df = pd.read_sql_query("SELECT buyer_name, number, type, amount FROM transactions WHERE buyer_name = ?", conn, params=(buyer_name,))
     conn.close()
 
-    if df.empty:
-        return f"ไม่พบข้อมูลของ {buyer_name}"
+    if df.empty: return f"ไม่พบข้อมูลของ {buyer_name}"
 
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Report', index=False)
+    output = create_summary_excel(df, lambda b: "Report")
     
-    output.seek(0)
     return send_file(output, download_name=f"Lotto_{buyer_name}.xlsx", as_attachment=True)
 
-# 3. PDF/Print View: หน้าสรุปสำหรับพิมพ์ (Save as PDF)
+# 3. PDF/Print View: หน้าสรุปสำหรับพิมพ์ (รวมยอดเลขซ้ำให้แล้ว)
 @app.route('/print/bill/<path:buyer_name>')
 def print_bill(buyer_name):
     if not check_auth(): return redirect(url_for('login'))
     
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
-    # ดึงรายการซื้อ
-    rows = conn.cursor().execute("SELECT * FROM transactions WHERE buyer_name=? ORDER BY type, number", (buyer_name,)).fetchall()
     
-    # คำนวณยอดรวม
+    # ✅ แก้ไข SQL: ใช้ SUM(amount) และ GROUP BY เพื่อรวมยอดเลขเดียวกัน
+    sql = """
+        SELECT type, number, SUM(amount) as amount 
+        FROM transactions 
+        WHERE buyer_name=? 
+        GROUP BY type, number 
+        ORDER BY type, number
+    """
+    rows = conn.cursor().execute(sql, (buyer_name,)).fetchall()
+    
+    # คำนวณยอดรวมสุทธิ
     total = sum([r['amount'] for r in rows])
     
     conn.close()
     
-    # ส่งไปที่ Template ใหม่ (ต้องสร้างไฟล์ print_bill.html)
     return render_template('print_bill.html', buyer=buyer_name, transactions=rows, total=total, date=datetime.now().strftime('%d/%m/%Y'))
 
 if __name__ == '__main__':

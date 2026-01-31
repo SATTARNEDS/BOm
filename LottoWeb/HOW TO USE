@@ -20,4 +20,13 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
+cd LottoWeb
 python app.py
+
+
+
+pythonanywhere
+
+Console ->  cd BOm
+            git pull
+Web -> Reload
