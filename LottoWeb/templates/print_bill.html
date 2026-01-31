@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>ใบสรุปรายการ - {{ buyer }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* ตั้งค่ากระดาษ A4 */
+        @page { size: A4; margin: 20mm; }
+        body { font-family: 'Sarabun', sans-serif; }
+        
+        .bill-container {
+            max-width: 210mm;
+            margin: auto;
+            background: white;
+            padding: 20px;
+        }
+        
+        /* ซ่อนปุ่มเวลาสั่งพิมพ์ */
+        @media print {
+            .no-print { display: none !important; }
+            .bill-container { box-shadow: none; border: none; }
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<div class="bill-container shadow-sm mt-4">
+    <div class="text-center mb-4">
+        <h3>📄 ใบสรุปรายการ</h3>
+        <h4>ลูกค้า: {{ buyer }}</h4>
+        <p>วันที่พิมพ์: {{ date }}</p>
+    </div>
+
+    <table class="table table-bordered table-sm">
+        <thead class="table-light text-center">
+            <tr>
+                <th width="10%">ลำดับ</th>
+                <th width="20%">ประเภท</th>
+                <th width="20%">เลข</th>
+                <th width="20%">ราคา</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in transactions %}
+            <tr>
+                <td class="text-center">{{ loop.index }}</td>
+                <td class="text-center">{{ row['type'] }}</td>
+                <td class="text-center fw-bold">{{ row['number'] }}</td>
+                <td class="text-end pe-3">{{ row['amount'] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot class="table-dark">
+            <tr>
+                <td colspan="3" class="text-end fw-bold pe-3">ยอดรวมสุทธิ</td>
+                <td class="text-end fw-bold pe-3">{{ "{:,.0f}".format(total) }}</td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-5 no-print">
+        <button onclick="window.print()" class="btn btn-primary btn-lg">🖨️ พิมพ์ / บันทึกเป็น PDF</button>
+        <button onclick="window.close()" class="btn btn-secondary btn-lg">ปิดหน้าต่าง</button>
+    </div>
+</div>
+
+</body>
+</html>

@@ -161,6 +161,9 @@ function loadBuyers() {
                 <td class="text-danger fw-bold">-${b.disc_amt.toLocaleString()}</td>
                 <td class="fw-bold text-success fs-5">${b.net.toLocaleString()}</td>
                 <td>
+                    <a href="/export/excel/${b.name}" target="_blank" class="btn btn-sm btn-success me-1 shadow-sm" title="Excel"><i class="fas fa-file-excel"></i></a>
+                    <a href="/print/bill/${b.name}" target="_blank" class="btn btn-sm btn-secondary me-1 shadow-sm" title="PDF/Print"><i class="fas fa-print"></i></a>
+                    
                     <button class="btn btn-sm btn-warning me-1 shadow-sm" onclick="editBuyer(${b.id},'${b.name}',${b.discount})"><i class="fas fa-pen"></i></button>
                     <button class="btn btn-sm btn-info text-white me-1 shadow-sm" onclick="viewBuy('${b.name}')"><i class="fas fa-list"></i></button>
                     <button class="btn btn-sm btn-danger shadow-sm" onclick="deleteBuyer(${b.id},'${b.name}')"><i class="fas fa-trash"></i></button>

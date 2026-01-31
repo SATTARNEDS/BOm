@@ -6,7 +6,7 @@ import time
 # ==========================================
 # ⚙️ ตั้งค่า (Safe Mode สำหรับ Ngrok ฟรี)
 # ==========================================
-TARGET_URL = "https://unpreferred-sorediate-celestine.ngrok-free.dev" # ⚠️ ใส่ Link Ngrok ของคุณ
+TARGET_URL = "https://sattarned.pythonanywhere.com/" # ⚠️ ใส่ Link Ngrok ของคุณ
 TOTAL_USERS = 4        
 ITEMS_PER_USER = 100   # ลดจำนวนลงหน่อย (เดี๋ยวยาวเกิน)
 DELAY_MIN = 2.0        # ⚠️ รออย่างน้อย 2 วินาที (สำคัญมาก!)

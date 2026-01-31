@@ -4,6 +4,9 @@ import os
 import json
 import time
 import base64
+import pandas as pd
+import io
+from flask import send_file
 from itertools import permutations
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, abort
@@ -553,6 +556,79 @@ def check_reward():
 def clear_data():
     conn = sqlite3.connect(DB_NAME, timeout=30); conn.cursor().execute("DELETE FROM transactions"); conn.commit(); conn.close()
     return jsonify({"status":"success"})
+
+# =======================================================
+# ✅ เพิ่มส่วน Export Excel และ PDF
+# =======================================================
+
+# 1. Export Excel: แยก Sheet ตามรายชื่อลูกค้า
+@app.route('/export/excel_all')
+def export_excel_all():
+    if not check_auth(): return redirect(url_for('login'))
+    
+    conn = sqlite3.connect(DB_NAME)
+    # ดึงข้อมูลทั้งหมด
+    df = pd.read_sql_query("SELECT buyer_name, number, type, amount, created_at FROM transactions ORDER BY buyer_name, created_at", conn)
+    conn.close()
+
+    if df.empty:
+        return "ไม่มีข้อมูลรายการขาย"
+
+    output = io.BytesIO()
+    # ใช้ ExcelWriter เพื่อเขียนหลาย Sheet
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # หาชื่อลูกค้าทั้งหมดที่ไม่ซ้ำกัน
+        unique_buyers = df['buyer_name'].unique()
+        
+        for buyer in unique_buyers:
+            # กรองข้อมูลเฉพาะลูกค้ารายนี้
+            buyer_df = df[df['buyer_name'] == buyer]
+            
+            # ตั้งชื่อ Sheet (Excel ห้ามชื่อยาวเกิน 31 ตัวอักษร)
+            sheet_name = str(buyer)[:30].replace(":", "-").replace("/", "-")
+            
+            # เขียนลง Sheet
+            buyer_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+    output.seek(0)
+    return send_file(output, download_name="Lotto_Report_By_User.xlsx", as_attachment=True)
+
+# 2. Export Excel: เฉพาะลูกค้ารายคน
+@app.route('/export/excel/<path:buyer_name>')
+def export_excel_buyer(buyer_name):
+    if not check_auth(): return redirect(url_for('login'))
+    
+    conn = sqlite3.connect(DB_NAME)
+    df = pd.read_sql_query("SELECT number, type, amount, created_at FROM transactions WHERE buyer_name = ?", conn, params=(buyer_name,))
+    conn.close()
+
+    if df.empty:
+        return f"ไม่พบข้อมูลของ {buyer_name}"
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Report', index=False)
+    
+    output.seek(0)
+    return send_file(output, download_name=f"Lotto_{buyer_name}.xlsx", as_attachment=True)
+
+# 3. PDF/Print View: หน้าสรุปสำหรับพิมพ์ (Save as PDF)
+@app.route('/print/bill/<path:buyer_name>')
+def print_bill(buyer_name):
+    if not check_auth(): return redirect(url_for('login'))
+    
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    # ดึงรายการซื้อ
+    rows = conn.cursor().execute("SELECT * FROM transactions WHERE buyer_name=? ORDER BY type, number", (buyer_name,)).fetchall()
+    
+    # คำนวณยอดรวม
+    total = sum([r['amount'] for r in rows])
+    
+    conn.close()
+    
+    # ส่งไปที่ Template ใหม่ (ต้องสร้างไฟล์ print_bill.html)
+    return render_template('print_bill.html', buyer=buyer_name, transactions=rows, total=total, date=datetime.now().strftime('%d/%m/%Y'))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0')
