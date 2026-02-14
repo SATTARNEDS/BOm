@@ -23,9 +23,16 @@ pip install -r requirements.txt
 cd LottoWeb
 python app.py
 
+GitHub:
+git config --global user.email "sattarned_sarakarn@hotmail.com"
+git config --global user.name "SATTARNEDS"
+
+git config --list
 
 
 pythonanywhere
+sattarned_sarakarn@hotmail.com 
+bom05183
 
 Console ->  cd BOm
             git pull
