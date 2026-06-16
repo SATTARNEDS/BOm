@@ -432,20 +432,65 @@ def delete_multiple():
     conn.commit(); conn.close()
     return jsonify({"status":"success"})
 
+def _parse_discount(value):
+    try:
+        if value is None or value == '': return 0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0
+
 @app.route('/api/buyers', methods=['GET','POST','PUT'])
 def api_buyers():
     conn = sqlite3.connect(DB_NAME, timeout=30); conn.row_factory = sqlite3.Row; cur = conn.cursor()
-    if request.method == 'POST': 
-        try: cur.execute("INSERT INTO buyers (name, discount) VALUES (?, ?)", (request.json['name'], request.json.get('discount',0))); conn.commit(); return jsonify({"status": "success"})
-        except: return jsonify({"status": "error", "message": "ชื่อซ้ำ"})
+    if request.method == 'POST':
+        try:
+            discount = _parse_discount(request.json.get('discount', 0))
+            cur.execute("INSERT INTO buyers (name, discount) VALUES (?, ?)", (request.json['name'].strip(), discount))
+            conn.commit()
+            return jsonify({"status": "success"})
+        except sqlite3.IntegrityError:
+            return jsonify({"status": "error", "message": "ชื่อซ้ำ"})
+        finally:
+            conn.close()
     elif request.method == 'PUT':
-        d = request.json; cur.execute("UPDATE buyers SET name=?, discount=? WHERE id=?", (d['name'], d['discount'], d['id'])); conn.commit(); return jsonify({"status": "success"})
-    cur.execute("SELECT b.id, b.name, b.discount, IFNULL(SUM(t.amount),0) as total FROM buyers b LEFT JOIN transactions t ON b.name = t.buyer_name GROUP BY b.id")
+        d = request.json
+        buyer_id = d.get('id')
+        new_name = (d.get('name') or '').strip()
+        discount = _parse_discount(d.get('discount', 0))
+        if not new_name:
+            conn.close()
+            return jsonify({"status": "error", "message": "กรุณาใส่ชื่อ"})
+        try:
+            cur.execute("SELECT name FROM buyers WHERE id=?", (buyer_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"status": "error", "message": "ไม่พบข้อมูลผู้ซื้อ"})
+            old_name = row['name']
+            cur.execute("UPDATE buyers SET name=?, discount=? WHERE id=?", (new_name, discount, buyer_id))
+            if old_name != new_name:
+                cur.execute("UPDATE transactions SET buyer_name=? WHERE buyer_name=?", (new_name, old_name))
+            conn.commit()
+            return jsonify({"status": "success"})
+        except sqlite3.IntegrityError:
+            return jsonify({"status": "error", "message": "ชื่อซ้ำ"})
+        finally:
+            conn.close()
+    cur.execute("""
+        INSERT OR IGNORE INTO buyers (name, discount)
+        SELECT DISTINCT buyer_name, 0 FROM transactions
+        WHERE buyer_name IS NOT NULL AND buyer_name != ''
+          AND buyer_name NOT IN (SELECT name FROM buyers)
+    """)
+    conn.commit()
+    cur.execute("SELECT b.id, b.name, b.discount, IFNULL(SUM(t.amount),0) as total FROM buyers b LEFT JOIN transactions t ON b.name = t.buyer_name GROUP BY b.id ORDER BY b.name")
     res = []
     for r in cur.fetchall():
-        disc_amt = r['total']*r['discount']/100
-        res.append({'id':r['id'], 'name':r['name'], 'discount':r['discount'], 'total':r['total'], 'disc_amt':disc_amt, 'net':r['total']-disc_amt})
-    conn.close(); return jsonify(res)
+        total = float(r['total'] or 0)
+        discount = _parse_discount(r['discount'])
+        disc_amt = total * discount / 100
+        res.append({'id': r['id'], 'name': r['name'], 'discount': discount, 'total': total, 'disc_amt': disc_amt, 'net': total - disc_amt})
+    conn.close()
+    return jsonify(res)
 
 @app.route('/delete_buyer/<int:id>', methods=['POST'])
 def delete_buyer(id):

@@ -1,4 +1,5 @@
 let reportData = {};
+let buyersCache = [];
 let currentPopupType = 'keep';
 let currentDashTab = {k1:'2_top', k2:'2_bottom', t1:'สองตัวบน', t2:'สองตัวล่าง'};
 
@@ -149,53 +150,116 @@ function toggleAllModal(e) { document.querySelectorAll('.del-chk-modal').forEach
 
 // --- BUYERS ---
 function loadBuyers() {
-    fetch('/api/buyers').then(r=>r.json()).then(d=>{
-        const s=document.getElementById('k_buyer'); 
-        if(s.options.length!==d.length){ s.innerHTML=''; d.forEach(b=>s.add(new Option(b.name,b.name))); if(d.length) s.value=d[0].name; }
-        let h=''; 
-        d.forEach(b=>{ 
-            h+=`<tr>
-                <td class="fw-bold text-start ps-3 text-primary">${b.name}</td>
-                <td>${b.total.toLocaleString()}</td>
-                <td>${b.discount}%</td>
-                <td class="text-danger fw-bold">-${b.disc_amt.toLocaleString()}</td>
-                <td class="fw-bold text-success fs-5">${b.net.toLocaleString()}</td>
+    fetch('/api/buyers')
+        .then(r => {
+            if (!r.ok) throw new Error('โหลดข้อมูลผู้ซื้อไม่สำเร็จ');
+            return r.json();
+        })
+        .then(d => {
+            if (!Array.isArray(d)) d = [];
+            buyersCache = d;
+
+            const s = document.getElementById('k_buyer');
+            if (s && s.options.length !== d.length) {
+                s.innerHTML = '';
+                d.forEach(b => s.add(new Option(b.name, b.name)));
+                if (d.length) s.value = d[0].name;
+            }
+
+            let h = '';
+            d.forEach(b => {
+                const total = Number(b.total) || 0;
+                const discount = Number(b.discount) || 0;
+                const discAmt = Number(b.disc_amt) || 0;
+                const net = Number(b.net) || 0;
+                const encodedName = encodeURIComponent(b.name);
+                h += `<tr>
+                <td class="fw-bold text-start ps-3 text-primary">${escapeHtml(b.name)}</td>
+                <td>${total.toLocaleString()}</td>
+                <td>${discount}%</td>
+                <td class="text-danger fw-bold">-${discAmt.toLocaleString()}</td>
+                <td class="fw-bold text-success fs-5">${net.toLocaleString()}</td>
                 <td>
-                    <a href="/export/excel/${b.name}" target="_blank" class="btn btn-sm btn-success me-1 shadow-sm" title="Excel"><i class="fas fa-file-excel"></i></a>
-                    <a href="/print/bill/${b.name}" target="_blank" class="btn btn-sm btn-secondary me-1 shadow-sm" title="PDF/Print"><i class="fas fa-print"></i></a>
-                    
-                    <button class="btn btn-sm btn-warning me-1 shadow-sm" onclick="editBuyer(${b.id},'${b.name}',${b.discount})"><i class="fas fa-pen"></i></button>
-                    <button class="btn btn-sm btn-info text-white me-1 shadow-sm" onclick="viewBuy('${b.name}')"><i class="fas fa-list"></i></button>
-                    <button class="btn btn-sm btn-danger shadow-sm" onclick="deleteBuyer(${b.id},'${b.name}')"><i class="fas fa-trash"></i></button>
+                    <a href="/export/excel/${encodedName}" target="_blank" class="btn btn-sm btn-success me-1 shadow-sm" title="Excel"><i class="fas fa-file-excel"></i></a>
+                    <a href="/print/bill/${encodedName}" target="_blank" class="btn btn-sm btn-secondary me-1 shadow-sm" title="PDF/Print"><i class="fas fa-print"></i></a>
+                    <button class="btn btn-sm btn-warning me-1 shadow-sm" onclick="editBuyer(${b.id})"><i class="fas fa-pen"></i></button>
+                    <button class="btn btn-sm btn-info text-white me-1 shadow-sm" onclick="viewBuyById(${b.id})"><i class="fas fa-list"></i></button>
+                    <button class="btn btn-sm btn-danger shadow-sm" onclick="deleteBuyer(${b.id})"><i class="fas fa-trash"></i></button>
                 </td>
-            </tr>`; 
+            </tr>`;
+            });
+            document.getElementById('buyerBody').innerHTML = h;
+        })
+        .catch(err => {
+            console.error('loadBuyers:', err);
+            alert('ไม่สามารถโหลดรายชื่อผู้ซื้อได้ กรุณารีเฟรชหน้าเว็บ');
         });
-        document.getElementById('buyerBody').innerHTML=h;
-    });
+}
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+function getBuyerById(id) {
+    return buyersCache.find(b => String(b.id) === String(id));
 }
 function addBuyer() { document.getElementById('manageBuyerTitle').innerText="เพิ่มผู้ซื้อ"; document.getElementById('mb_id').value=""; document.getElementById('mb_name').value=""; document.getElementById('mb_discount').value="0"; new bootstrap.Modal(document.getElementById('manageBuyerModal')).show(); }
-function deleteBuyer(id, name) {
-    if(confirm('⚠️ คำเตือน: คุณต้องการลบ "' + name + '" ใช่หรือไม่?\n\n‼️ ยอดซื้อและรายการทั้งหมดของคนนี้จะถูกลบหายไปทันที และกู้คืนไม่ได้')) {
+function deleteBuyer(id) {
+    const buyer = getBuyerById(id);
+    if (!buyer) return alert('ไม่พบข้อมูลผู้ซื้อ');
+    if(confirm('⚠️ คำเตือน: คุณต้องการลบ "' + buyer.name + '" ใช่หรือไม่?\n\n‼️ ยอดซื้อและรายการทั้งหมดของคนนี้จะถูกลบหายไปทันที และกู้คืนไม่ได้')) {
         fetch('/delete_buyer/' + id, { method: 'POST' })
             .then(r => r.json())
             .then(d => {
                 if(d.status === 'success') {
-                    // โหลดตารางรายชื่อใหม่
-                    loadBuyers(); 
-                    // โหลดรายการล่าสุด และยอดรวม Dashboard ใหม่ด้วย เพราะยอดหายไปแล้ว
+                    loadBuyers();
                     loadRecent();
-                    loadReport(); 
+                    loadReport();
                 } else {
                     alert('เกิดข้อผิดพลาด ไม่พบข้อมูลผู้ใช้งาน');
                 }
             });
     }
 }
-function editBuyer(id,n,d) { document.getElementById('manageBuyerTitle').innerText="แก้ไขข้อมูล"; document.getElementById('mb_id').value=id; document.getElementById('mb_name').value=n; document.getElementById('mb_discount').value=d; new bootstrap.Modal(document.getElementById('manageBuyerModal')).show(); }
+function editBuyer(id) {
+    const buyer = getBuyerById(id);
+    if (!buyer) return alert('ไม่พบข้อมูลผู้ซื้อ');
+    document.getElementById('manageBuyerTitle').innerText="แก้ไขข้อมูล";
+    document.getElementById('mb_id').value=buyer.id;
+    document.getElementById('mb_name').value=buyer.name;
+    document.getElementById('mb_discount').value=buyer.discount ?? 0;
+    new bootstrap.Modal(document.getElementById('manageBuyerModal')).show();
+}
+function viewBuyById(id) {
+    const buyer = getBuyerById(id);
+    if (!buyer) return alert('ไม่พบข้อมูลผู้ซื้อ');
+    viewBuy(buyer.name);
+}
 function saveBuyerData() {
-    const id=document.getElementById('mb_id').value, name=document.getElementById('mb_name').value, discount=document.getElementById('mb_discount').value;
+    const id = document.getElementById('mb_id').value;
+    const name = document.getElementById('mb_name').value.trim();
+    const discount = document.getElementById('mb_discount').value;
     if(!name) return alert('กรุณาใส่ชื่อ');
-    fetch('/api/buyers', { method:id?'PUT':'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id,name,discount}) }).then(r=>r.json()).then(d=>{ if(d.status==='success'){ bootstrap.Modal.getInstance(document.getElementById('manageBuyerModal')).hide(); loadBuyers(); } else alert(d.message); });
+    fetch('/api/buyers', {
+        method: id ? 'PUT' : 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, name, discount: discount === '' ? 0 : discount})
+    })
+        .then(r => r.json())
+        .then(d => {
+            if(d.status === 'success') {
+                const modalEl = document.getElementById('manageBuyerModal');
+                const modal = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+                modal.hide();
+                loadBuyers();
+            } else {
+                alert(d.message || 'บันทึกไม่สำเร็จ');
+            }
+        })
+        .catch(() => alert('บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่'));
 }
 
 // -------------------------------------------------------------------------
