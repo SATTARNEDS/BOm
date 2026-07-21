@@ -261,13 +261,32 @@
 <div class="modal fade" id="viewAllModal" tabindex="-1">
     <div class="modal-dialog modal-wide modal-dialog-scrollable">
         <div class="modal-content">
-            <div class="modal-header bg-dark text-white"><h5 class="modal-title"><i class="fas fa-list me-2"></i> รายการทั้งหมด (500 ล่าสุด)</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-header bg-dark text-white"><h5 class="modal-title"><i class="fas fa-list me-2"></i> ค้นหา / แก้ไขรายการตามผู้ซื้อ</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
             <div class="modal-body p-0">
-                <div class="p-2 bg-light border-bottom d-flex justify-content-end sticky-top"><button class="btn btn-sm btn-outline-danger" onclick="deleteFromModal()"><i class="fas fa-trash-alt me-1"></i> ลบรายการที่เลือก</button></div>
-                <table class="table table-striped table-hover text-center align-middle mb-0 small"><thead class="table-secondary sticky-top" style="top: 0px;"><tr><th width="50"><input type="checkbox" onchange="toggleAllModal(this)"></th><th>เวลา</th><th>ผู้ซื้อ</th><th>เลข</th><th>ประเภท</th><th>บาท</th><th>ลบ</th></tr></thead><tbody id="viewAllBody"></tbody></table>
+                <div class="p-3 bg-light border-bottom sticky-top">
+                    <div class="row g-2 align-items-center">
+                        <div class="col-md"><label for="transactionBuyerFilter" class="visually-hidden">กรองตามผู้ซื้อ</label><select id="transactionBuyerFilter" class="form-select" onchange="loadTransactionPage(1)"><option value="">ผู้ซื้อทั้งหมด</option></select></div>
+                        <div class="col-md-auto"><button class="btn btn-outline-danger w-100" onclick="deleteFromModal()"><i class="fas fa-trash-alt me-1"></i> ลบรายการที่เลือก</button></div>
+                    </div>
+                </div>
+                <div class="table-responsive"><table class="table table-striped table-hover text-center align-middle mb-0 small"><thead class="table-secondary"><tr><th width="50"><input type="checkbox" onchange="toggleAllModal(this)" aria-label="เลือกทั้งหมดในหน้านี้"></th><th>วัน/เวลา</th><th>ผู้ซื้อ</th><th>เลข</th><th>ประเภท</th><th>บาท</th><th>จัดการ</th></tr></thead><tbody id="viewAllBody"></tbody></table></div>
+                <div class="d-flex justify-content-between align-items-center p-3 border-top bg-white"><button id="transactionsPrev" class="btn btn-outline-secondary" onclick="loadTransactionPage(transactionPage - 1)">ก่อนหน้า</button><span id="transactionsPageInfo" class="small fw-bold" aria-live="polite"></span><button id="transactionsNext" class="btn btn-outline-secondary" onclick="loadTransactionPage(transactionPage + 1)">ถัดไป</button></div>
             </div>
         </div>
     </div>
+</div>
+
+<div class="modal fade" id="editTransactionModal" tabindex="-1" aria-labelledby="editTransactionTitle" aria-hidden="true">
+    <div class="modal-dialog"><div class="modal-content">
+        <div class="modal-header bg-warning"><h5 class="modal-title" id="editTransactionTitle">แก้ไขรายการซื้อ</h5><button class="btn-close" data-bs-dismiss="modal" aria-label="ปิด"></button></div>
+        <div class="modal-body"><input type="hidden" id="editTransactionId">
+            <div class="mb-3"><label for="editTransactionBuyer" class="form-label fw-bold">ผู้ซื้อ</label><select id="editTransactionBuyer" class="form-select"></select></div>
+            <div class="mb-3"><label for="editTransactionNumber" class="form-label fw-bold">เลข</label><input id="editTransactionNumber" class="form-control" inputmode="numeric" maxlength="3" oninput="validateNum(this)"></div>
+            <div class="mb-3"><label for="editTransactionType" class="form-label fw-bold">ประเภท</label><select id="editTransactionType" class="form-select"><option>3 ตัวบน</option><option>3 ตัวโต๊ด</option><option>3 ตัวล่าง</option><option>2 ตัวบน</option><option>2 ตัวล่าง</option><option>วิ่งบน</option><option>วิ่งล่าง</option></select></div>
+            <div><label for="editTransactionAmount" class="form-label fw-bold">ยอดเงิน</label><input id="editTransactionAmount" type="number" min="1" class="form-control"></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button><button class="btn btn-primary" onclick="saveTransactionEdit()">บันทึกการแก้ไข</button></div>
+    </div></div>
 </div>
 
 <div class="modal fade" id="manageBuyerModal" tabindex="-1">

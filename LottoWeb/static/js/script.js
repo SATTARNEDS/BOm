@@ -1,5 +1,8 @@
 let reportData = {};
 let buyersCache = [];
+let transactionPage = 1;
+let transactionTotalPages = 1;
+let transactionItemsCache = [];
 let currentPopupType = 'keep';
 let currentDashTab = {k1:'2_top', k2:'2_bottom', t1:'สองตัวบน', t2:'สองตัวล่าง'};
 
@@ -133,18 +136,64 @@ function val(id) { const el=document.getElementById(id); return el?el.value:''; 
 
 // --- RECENT & VIEW ALL ---
 function loadRecent() { fetch('/api/recent').then(r=>r.json()).then(d=>{ renderRecent(d, 'recentBody'); }); }
-function openViewAll() { fetch('/api/transactions').then(r=>r.json()).then(d=>{ renderRecent(d, 'viewAllBody', true); new bootstrap.Modal(document.getElementById('viewAllModal')).show(); }); }
+function openViewAll() {
+    const filter = document.getElementById('transactionBuyerFilter');
+    const selectedBuyer = filter.value;
+    filter.innerHTML = '<option value="">ผู้ซื้อทั้งหมด</option>';
+    buyersCache.forEach(b => filter.add(new Option(b.name, b.name)));
+    filter.value = selectedBuyer;
+    loadTransactionPage(1);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('viewAllModal')).show();
+}
+function loadTransactionPage(page) {
+    if (page < 1) return;
+    const buyer = document.getElementById('transactionBuyerFilter').value;
+    fetch(`/api/transactions?page=${page}&buyer=${encodeURIComponent(buyer)}`).then(r=>r.json()).then(d=>{
+        transactionPage = d.page;
+        transactionTotalPages = d.total_pages;
+        transactionItemsCache = d.items || [];
+        renderRecent(transactionItemsCache, 'viewAllBody', true);
+        document.getElementById('transactionsPageInfo').innerText = `หน้า ${d.page} / ${d.total_pages} (${Number(d.total).toLocaleString()} รายการ)`;
+        document.getElementById('transactionsPrev').disabled = d.page <= 1;
+        document.getElementById('transactionsNext').disabled = d.page >= d.total_pages;
+    });
+}
 function renderRecent(d, id, isModal=false) {
     let h='', cls=isModal?'del-chk-modal':'del-chk';
     d.forEach(i=>{
         let c=i.type.includes('บน')?'text-primary':(i.type.includes('ล่าง')?'text-success':'text-warning');
-        h+=`<tr><td><input type="checkbox" class="form-check-input ${cls}" value="${i.id}"></td><td class="text-muted small">${i.time}</td><td>${i.buyer}</td><td class="fw-bold fs-5">${i.num}</td><td><span class="badge bg-light border ${c} text-dark">${i.type}</span></td><td class="fw-bold text-end">${i.amt.toLocaleString()}</td><td><button onclick="delItem(${i.id})" class="btn btn-sm btn-outline-danger border-0"><i class="fas fa-times"></i></button></td></tr>`;
+        const editButton = isModal ? `<button onclick="editTransaction(${i.id})" class="btn btn-sm btn-outline-warning me-1" title="แก้ไขรายการ"><i class="fas fa-pen"></i></button>` : '';
+        h+=`<tr><td><input type="checkbox" class="form-check-input ${cls}" value="${i.id}"></td><td class="text-muted small">${escapeHtml(i.time)}</td><td>${escapeHtml(i.buyer)}</td><td class="fw-bold fs-5">${escapeHtml(i.num)}</td><td><span class="badge bg-light border ${c} text-dark">${escapeHtml(i.type)}</span></td><td class="fw-bold text-end">${Number(i.amt).toLocaleString()}</td><td>${editButton}<button onclick="delItem(${i.id}, ${isModal})" class="btn btn-sm btn-outline-danger" title="ลบรายการ"><i class="fas fa-times"></i></button></td></tr>`;
     });
     document.getElementById(id).innerHTML=h;
 }
-function delItem(id) { if(confirm('ลบรายการนี้?')) fetch('/delete/'+id,{method:'POST'}).then(syncData); }
+function delItem(id, reloadModal=false) { if(confirm('ลบรายการนี้?')) fetch('/delete/'+id,{method:'POST'}).then(()=>{ syncData(); if(reloadModal) loadTransactionPage(transactionPage); }); }
 function deleteSelected() { const ids=Array.from(document.querySelectorAll('.del-chk:checked')).map(c=>parseInt(c.value)); if(ids.length) fetch('/delete_multiple',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})}).then(syncData); }
-function deleteFromModal() { const ids=Array.from(document.querySelectorAll('.del-chk-modal:checked')).map(c=>parseInt(c.value)); if(ids.length && confirm(`ลบ ${ids.length} รายการ?`)) fetch('/delete_multiple',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})}).then(()=>{ syncData(); openViewAll(); }); }
+function deleteFromModal() { const ids=Array.from(document.querySelectorAll('.del-chk-modal:checked')).map(c=>parseInt(c.value)); if(ids.length && confirm(`ลบ ${ids.length} รายการ?`)) fetch('/delete_multiple',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})}).then(()=>{ syncData(); loadTransactionPage(transactionPage); }); }
+function editTransaction(id) {
+    const item = transactionItemsCache.find(x => Number(x.id) === Number(id));
+    if (!item) return alert('ไม่พบรายการ');
+    const buyerSelect = document.getElementById('editTransactionBuyer');
+    buyerSelect.innerHTML = '';
+    buyersCache.forEach(b => buyerSelect.add(new Option(b.name, b.name)));
+    if (![...buyerSelect.options].some(o => o.value === item.buyer)) buyerSelect.add(new Option(item.buyer, item.buyer));
+    document.getElementById('editTransactionId').value = item.id;
+    buyerSelect.value = item.buyer;
+    document.getElementById('editTransactionNumber').value = item.num;
+    document.getElementById('editTransactionType').value = item.type;
+    document.getElementById('editTransactionAmount').value = item.amt;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editTransactionModal')).show();
+}
+function saveTransactionEdit() {
+    const id = document.getElementById('editTransactionId').value;
+    const payload = {buyer: val('editTransactionBuyer'), number: val('editTransactionNumber'), type: val('editTransactionType'), amount: val('editTransactionAmount')};
+    fetch('/api/transactions/' + id, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+        .then(async r => ({ok:r.ok, data:await r.json()})).then(({ok,data}) => {
+            if (!ok) return alert(data.message || 'แก้ไขไม่สำเร็จ');
+            bootstrap.Modal.getInstance(document.getElementById('editTransactionModal')).hide();
+            syncData(); loadBuyers(); loadTransactionPage(transactionPage);
+        }).catch(() => alert('เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่'));
+}
 function toggleAll(e) { document.querySelectorAll('.del-chk').forEach(c=>c.checked=e.checked); }
 function toggleAllModal(e) { document.querySelectorAll('.del-chk-modal').forEach(c=>c.checked=e.checked); }
 

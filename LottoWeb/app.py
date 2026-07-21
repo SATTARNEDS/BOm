@@ -69,6 +69,7 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value INTEGER)''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_transactions_buyer_id ON transactions (buyer_name, id DESC)")
     conn.commit()
     conn.close()
 
@@ -406,10 +407,51 @@ def api_ocr_scan():
 
 @app.route('/api/transactions')
 def api_all_transactions():
+    if not check_auth(): return jsonify({"status": "error", "message": "กรุณาเข้าสู่ระบบ"}), 401
+    buyer = (request.args.get('buyer') or '').strip()
+    try: page = max(1, int(request.args.get('page', 1)))
+    except (TypeError, ValueError): page = 1
+    page_size = 100
+    offset = (page - 1) * page_size
     conn = sqlite3.connect(DB_NAME, timeout=30)
-    r = conn.cursor().execute("SELECT id, strftime('%H:%M:%S', created_at) as time, buyer_name, number, type, amount FROM transactions ORDER BY id DESC LIMIT 500").fetchall()
+    cursor = conn.cursor()
+    where_sql = " WHERE buyer_name=?" if buyer else ""
+    params = (buyer,) if buyer else ()
+    total = cursor.execute(f"SELECT COUNT(*) FROM transactions{where_sql}", params).fetchone()[0]
+    r = cursor.execute(
+        f"SELECT id, strftime('%d/%m/%Y %H:%M:%S', created_at) as time, buyer_name, number, type, amount "
+        f"FROM transactions{where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
+        (*params, page_size, offset)
+    ).fetchall()
     conn.close()
-    return jsonify([{'id':i[0],'time':i[1],'buyer':i[2],'num':i[3],'type':i[4],'amt':i[5]} for i in r])
+    return jsonify({
+        'items': [{'id':i[0],'time':i[1],'buyer':i[2],'num':i[3],'type':i[4],'amt':i[5]} for i in r],
+        'page': page, 'page_size': page_size, 'total': total,
+        'total_pages': max(1, (total + page_size - 1) // page_size)
+    })
+
+@app.route('/api/transactions/<int:transaction_id>', methods=['PUT'])
+def update_transaction(transaction_id):
+    if not check_auth(): return jsonify({"status": "error", "message": "กรุณาเข้าสู่ระบบ"}), 401
+    data = request.get_json(silent=True) or {}
+    buyer = (data.get('buyer') or '').strip()
+    number = re.sub(r'\D', '', str(data.get('number') or ''))
+    transaction_type = (data.get('type') or '').strip()
+    valid_types = {'3 ตัวบน', '3 ตัวโต๊ด', '3 ตัวล่าง', '2 ตัวบน', '2 ตัวล่าง', 'วิ่งบน', 'วิ่งล่าง'}
+    try: amount = int(data.get('amount'))
+    except (TypeError, ValueError): amount = 0
+    if not buyer or not 1 <= len(number) <= 3 or transaction_type not in valid_types or amount <= 0:
+        return jsonify({"status": "error", "message": "ข้อมูลไม่ถูกต้อง กรุณาตรวจชื่อ เลข ประเภท และยอดเงิน"}), 400
+    conn = sqlite3.connect(DB_NAME, timeout=30)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE transactions SET buyer_name=?, number=?, type=?, amount=? WHERE id=?",
+                   (buyer, number, transaction_type, amount, transaction_id))
+    if cursor.rowcount == 0:
+        conn.close()
+        return jsonify({"status": "error", "message": "ไม่พบรายการที่ต้องการแก้ไข"}), 404
+    cursor.execute("INSERT OR IGNORE INTO buyers (name, discount) VALUES (?, 0)", (buyer,))
+    conn.commit(); conn.close()
+    return jsonify({"status": "success"})
 
 @app.route('/api/recent')
 def api_recent():
@@ -420,11 +462,13 @@ def api_recent():
 
 @app.route('/delete/<int:id>', methods=['POST'])
 def delete_item(id):
+    if not check_auth(): return jsonify({"status": "error"}), 401
     conn = sqlite3.connect(DB_NAME, timeout=30); conn.cursor().execute("DELETE FROM transactions WHERE id=?",(id,)); conn.commit(); conn.close()
     return jsonify({"status":"success"})
 
 @app.route('/delete_multiple', methods=['POST'])
 def delete_multiple():
+    if not check_auth(): return jsonify({"status": "error"}), 401
     ids = request.json.get('ids', [])
     if not ids: return jsonify({"status":"error"})
     conn = sqlite3.connect(DB_NAME, timeout=30)
